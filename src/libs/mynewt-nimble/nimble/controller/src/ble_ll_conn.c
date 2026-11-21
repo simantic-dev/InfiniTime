@@ -2190,16 +2190,14 @@ ble_ll_conn_next_event(struct ble_ll_conn_sm *connsm)
         !connsm->csmflags.cfbit.conn_update_sched       &&
         !CONN_F_PHY_UPDATE_SCHED(connsm)                &&
         !connsm->csmflags.cfbit.chanmap_update_scheduled) {
-        /* Core v6.3 Vol 6 Part B 4.5.1: the peripheral may listen at any
-         * event. Skip latency while a transaction is in flight: data to
-         * send, or the central just sent data a reply may follow. */
         if (connsm->csmflags.cfbit.pkt_rxd &&
-            !connsm->csmflags.cfbit.rxd_data &&
-            !connsm->cur_tx_pdu &&
-            STAILQ_EMPTY(&connsm->conn_txq)) {
+            !connsm->csmflags.cfbit.latency_hold) {
             latency += connsm->slave_latency;
             itvl = itvl * latency;
         }
+    }
+    if (connsm->csmflags.cfbit.latency_hold) {
+        connsm->csmflags.cfbit.latency_hold--;
     }
     connsm->event_cntr += latency;
 
@@ -2622,7 +2620,6 @@ ble_ll_conn_event_end(struct ble_npl_event *ev)
     /* Reset "per connection event" variables */
     connsm->cons_rxd_bad_crc = 0;
     connsm->csmflags.cfbit.pkt_rxd = 0;
-    connsm->csmflags.cfbit.rxd_data = 0;
 
     /* See if we need to start any control procedures */
     ble_ll_ctrl_chk_proc_start(connsm);
@@ -3726,7 +3723,14 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
         goto conn_rx_data_pdu_end;
     }
 
-    connsm->csmflags.cfbit.rxd_data = 1;
+    /*
+     * Do not apply slave latency for the next 2 connection events. The
+     * shortest request chain is a request at event N, the response at N+1
+     * and the central's next request at N+2. The peripheral may listen at
+     * any event (Core v6.3 Vol 6 Part B 4.5.1). Data sent by the
+     * peripheral on its own does not set this, so it is still batched.
+     */
+    connsm->csmflags.cfbit.latency_hold = 2;
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     /*
