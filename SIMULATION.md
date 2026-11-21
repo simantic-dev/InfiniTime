@@ -65,8 +65,8 @@ Activity, not energy: no current or joule is fitted anywhere. From one run of th
 | boot | 0-2 | 65.5% | 266 | 2097 | SPIM0 (display, NOR) 762, RTC1 (tick) 663, PendSV 329, RADIO 174, RTC0 116 |
 | advertising, watch face | 2-6 | 7.8% | 293 | 771 | PendSV 383, RADIO 174, RTC0 116, RTC1 (tick) 69, POWER_CLOCK 29 |
 | connected, watch face | 7-15 | 7.3% | 233 | 576 | PendSV 312, RADIO 100, RTC0 67, RTC1 (tick) 64, POWER_CLOCK 33 |
-| connected, display off | 22-44 | 1.8% | 30 | 71 | PendSV 40, RTC1 (tick) 11, RADIO 10, RTC0 7, POWER_CLOCK 3 |
-| connected, watch face idle | 46-60, 62-76 | 6.9% | 76 | 229 | PendSV 137, RTC1 (tick) 60, SPIM0 (display, NOR) 13, RADIO 10, RTC0 7 |
+| connected, display off | 22-44 | 1.8% | 29 | 70 | PendSV 40, RTC1 (tick) 10, RADIO 10, RTC0 7, POWER_CLOCK 3 |
+| connected, watch face idle | 46-60, 62-76 | 6.8% | 75 | 228 | PendSV 136, RTC1 (tick) 59, SPIM0 (display, NOR) 13, RADIO 10, RTC0 7 |
 | notification shown | 92-99 | 17.2% | 457 | 2002 | SPIM0 (display, NOR) 1622, PendSV 209, RTC1 (tick) 151, RADIO 10, RTC0 7 |
 
 Task switches on an idle watch face, measured before the connection parameter change (30 ms interval; from a hook on `PendSV_Handler` after `vTaskSwitchContext`): IDLE 184/s, nimble LL 67/s, displayapp 50/s, MAIN (SystemTask) 11/s.
@@ -84,28 +84,30 @@ Task switches on an idle watch face, measured before the connection parameter ch
 
 ### Connection parameters
 
-Stock InfiniTime 1.16.1 never asks for connection parameters (no `ble_gap_update_params` in `src/`), so it keeps the phone's interval. This fork's one firmware change (`src/components/ble/NimbleController.cpp`, `RequestSlowConnection`): 10 s after connecting, so the phone's time sync and discovery run at its own interval, the watch asks for
+Stock InfiniTime 1.16.1 never asks for connection parameters (no `ble_gap_update_params` in `src/`), so it keeps the phone's interval. This fork's firmware changes are this request (`src/components/ble/NimbleController.cpp`, `RequestSlowConnection`): 10 s after connecting, so the phone's time sync and discovery run at its own interval, the watch asks for
 
 - **interval 45-60 ms, peripheral latency 4, supervision timeout 4 s.** These fit Apple's Accessory Design Guidelines connection-parameter rules (Interval Min >= 15 ms; Interval Min + 15 ms <= Interval Max; Interval Max x (latency + 1) <= 2 s; 2 s <= timeout <= 6 s; Interval Max x (latency + 1) x 3 < timeout) and the Core spec's timeout > (1 + latency) x interval x 2 (600 ms). PebbleOS asks for the same 45-60 ms with latency 4 when idle.
 - On failure (`ble_gap_update_params` error or a failed `BLE_GAP_EVENT_CONN_UPDATE`) it retries 10 s later, at most 3 attempts per connection; a successful update logs the granted interval, latency and timeout.
 
-**The trade.** With latency 4 the watch listens on one connection event in five when idle (every 300 ms at 60 ms). A phone-to-watch packet waits up to 300 ms for the watch to listen, and the vendored NimBLE controller (`ble_ll_conn.c:2189-2196`) applies the latency after every received packet even when the watch has a reply queued, so each request/response round trip takes about 600 ms instead of 60 ms. One notification write is accepted after 600 ms; a phone that walks GATT or pushes bulk data (DFU, file transfer) is slowed tenfold unless it asks for a faster interval or latency 0 itself, which a central can always do. The watch does not request a faster interval for DFU or file transfer (follow-up below).
+**The trade, and the controller fix.** With latency 4 the watch listens on one connection event in five when idle (every 300 ms at 60 ms), so a phone-to-watch packet waits up to 300 ms. The vendored NimBLE 1.3.0 controller also applied the latency after every received packet even with a reply queued, so each request/response round trip took about 600 ms instead of 60 ms. Upstream Apache NimBLE master has the same logic (`ble_ll_conn_next_event`, `use_periph_latency` checks only `pkt_rxd` and the update-procedure flags; apache/mynewt-nimble `eb6e534`, 2026-11-12), so there was nothing to cherry-pick.
 
-Same scenario, fork `main` (before) and this tree (after), `pyrite` from #3977:
+The second firmware change is in the vendored controller (`src/libs/mynewt-nimble/nimble/controller/src/ble_ll_conn.c`, `ble_ll_conn_next_event`; the library is vendored as plain files, not a submodule): the peripheral skips latency for the next event while it has a PDU in flight or queued (`cur_tx_pdu`, `conn_txq`), or when it received a new non-empty PDU in this event (new `rxd_data` flag), since a reply usually follows. Core v6.3 Vol 6 Part B 4.5.1: connPeripheralLatency is the number of events the peripheral "is not required to listen" for, so listening at more of them is allowed. Idle (empty PDUs only) still uses latency 4. A round trip now takes two 60 ms events (request, then the reply in the next event), and the scripted phone sends one PDU per event (it sets MD but does not extend the event), so a phone that extends events on MD would be faster still. Bulk transfers (DFU, file transfer) still run at 60 ms; the watch does not request a faster interval for them (follow-up below).
 
-| | before | after |
-|---|---|---|
-| interval / latency / timeout | 30 ms / 0 / 4 s (phone's CONNECT_IND) | 60 ms / 4 / 4 s, granted (Interval_Max), applied at 16.3 s |
-| connection events/s on air (display off / on) | 33.3 / 33.3 | 16.7 / 16.7 |
-| events answered by the watch/s | 33.3 / 33.3 | 3.4 / 3.3 |
-| awake, display off (22-44 s) | 2.5% | 1.8% |
-| awake, display on (46-60, 62-76 s) | 7.2% | 6.9% |
-| wakeups/s, display off / on | 205 / 233 | 30 / 76 |
-| IRQ entries/s, display off | 438: PendSV 220, RADIO 100, RTC0 67, POWER_CLOCK 33, RTC1 18 | 71: PendSV 40, RTC1 11, RADIO 10, RTC0 7, POWER_CLOCK 3 |
-| IRQ entries/s, display on | 589: PendSV 311, RADIO 100, RTC0 67, RTC1 65, POWER_CLOCK 33, SPIM0 13 | 229: PendSV 137, RTC1 60, SPIM0 13, RADIO 10, RTC0 7, POWER_CLOCK 3 |
-| time set (phone writes CTS, before the update) | 6.10 s | 6.11 s |
-| notification: write to accepted / to first frame drawn | 60 ms / 140 ms | 600 ms / 395 ms |
-| phone's New Alert discovery walk (23 round trips) + write | 1.36 s | 13.6 s |
+Same scenario, fork `main` (before), the parameter request alone (request) and this tree (request + controller fix), `pyrite` from #3977:
+
+| | before | request | request + fix |
+|---|---|---|---|
+| interval / latency / timeout | 30 ms / 0 / 4 s (phone's CONNECT_IND) | 60 ms / 4 / 4 s, granted (Interval_Max), applied at 16.3 s | same |
+| connection events/s on air (display off / on) | 33.3 / 33.3 | 16.7 / 16.7 | 16.7 / 16.7 |
+| events answered by the watch/s | 33.3 / 33.3 | 3.4 / 3.4 | 3.3 / 3.3 |
+| awake, display off (22-44 s) | 2.5% | 1.8% | 1.8% |
+| awake, display on (46-60, 62-76 s) | 7.2% | 6.9% | 6.8% |
+| wakeups/s, display off / on | 205 / 233 | 30 / 76 | 29 / 75 |
+| IRQ entries/s, display off | 438: PendSV 220, RADIO 100, RTC0 67, POWER_CLOCK 33, RTC1 18 | 71: PendSV 40, RTC1 11, RADIO 10, RTC0 7, POWER_CLOCK 3 | 70: PendSV 40, RTC1 10, RADIO 10, RTC0 7, POWER_CLOCK 3 |
+| IRQ entries/s, display on | 589: PendSV 311, RADIO 100, RTC0 67, RTC1 65, POWER_CLOCK 33, SPIM0 13 | 229: PendSV 137, RTC1 60, SPIM0 13, RADIO 10, RTC0 7, POWER_CLOCK 3 | 228: PendSV 136, RTC1 59, SPIM0 13, RADIO 10, RTC0 7, POWER_CLOCK 3 |
+| time set (phone writes CTS, before the update) | 6.10 s | 6.11 s | 6.10 s |
+| notification: write to accepted / to first frame drawn | 60 ms / 140 ms | 600 ms / 395 ms | 120 ms / 200 ms (frames sampled every 100 ms) |
+| phone's New Alert discovery walk (23 round trips) + write | 1.36 s | 13.6 s | 2.80 s |
 
 Events on air and answered are counted from `out/ble.pcap` (a packet within 1 ms of the previous one is the watch's answer). With the display on, the 50/s displayapp wakeups (finding 1) dominate, so the change saves little there; with it off, wakeups drop sevenfold.
 
