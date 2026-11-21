@@ -36,10 +36,10 @@ phone: Wireless.ScriptedBlePeer @ sysbus 0x21000000
 
 // Side button (P0.13, reads high while pressed), charger status CHG (P0.12) and power present (P0.19),
 // both active low (idle high = unplugged). The idle levels are driven again 1 ms in: the boot-time drive
-// does not reach the pads. The button is pressed at 32 s for 150 ms, after the display has timed out.
+// does not reach the pads. The button is pressed for 150 ms at 45 s and 61 s, each after the display has timed out.
 buttons: Scripted.ScriptedGpioPeer @ none
     file: "peers/gpio/pin_script.py"
-    config: "{\"idle\": {\"0\": 0, \"1\": 1, \"2\": 1}, \"events\": [{\"at_ms\": 1, \"line\": 1, \"level\": 1}, {\"at_ms\": 1, \"line\": 2, \"level\": 1}], \"holds\": [{\"line\": 0, \"at_ms\": 32000, \"for_ms\": 150, \"level\": 1}]}"
+    config: "{\"idle\": {\"0\": 0, \"1\": 1, \"2\": 1}, \"events\": [{\"at_ms\": 1, \"line\": 1, \"level\": 1}, {\"at_ms\": 1, \"line\": 2, \"level\": 1}], \"holds\": [{\"line\": 0, \"at_ms\": 45000, \"for_ms\": 150, \"level\": 1}, {\"line\": 0, \"at_ms\": 61000, \"for_ms\": 150, \"level\": 1}]}"
     numberOfGpios: 3
     0 -> gpio0@13
     1 -> gpio0@12

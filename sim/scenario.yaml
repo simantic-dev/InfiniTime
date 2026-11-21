@@ -1,6 +1,6 @@
 # PineTime: stock InfiniTime built from this tree (scripts/build_infinitime.sh) at 0x0, no bootloader.
-# The phone connects at 6 s and sets the time, pushes a notification at 10 s; the side button wakes the
-# display at 32 s.
+# The phone connects at 6 s and sets the time; the display times out at about 21 s. The side button wakes
+# it at 45 s and, after it times out again, at 61 s. The phone pushes a notification at 78 s.
 board: pinetime
 machines:
   watch:
@@ -13,4 +13,4 @@ media:
   - type: ble
     connect: [watch.radio, watch.phone]
     pcap: ../out/ble.pcap
-timeout: 40
+timeout: 100

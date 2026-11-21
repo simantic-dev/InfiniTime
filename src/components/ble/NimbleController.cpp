@@ -22,6 +22,17 @@
 
 using namespace Pinetime::Controllers;
 
+namespace {
+  // Delay after connecting before asking for the slow interval, so the phone's service discovery and time sync
+  // run at the interval it picked.
+  constexpr TickType_t connParamDelay = pdMS_TO_TICKS(10000);
+  constexpr uint8_t connParamMaxAttempts = 3;
+
+  void ConnParamTimerCallback(TimerHandle_t xTimer) {
+    static_cast<NimbleController*>(pvTimerGetTimerID(xTimer))->RequestSlowConnection();
+  }
+}
+
 NimbleController::NimbleController(Pinetime::System::SystemTask& systemTask,
                                    Ble& bleController,
                                    DateTime& dateTimeController,
@@ -78,6 +89,7 @@ void NimbleController::Init() {
   }
 
   nptr = this;
+  connParamTimer = xTimerCreate("connParam", connParamDelay, pdFALSE, this, ConnParamTimerCallback);
   ble_hs_cfg.reset_cb = nimble_on_reset;
   ble_hs_cfg.sync_cb = nimble_on_sync;
   ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
@@ -207,6 +219,8 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
       } else {
         connectionHandle = event->connect.conn_handle;
         bleController.Connect();
+        connParamAttempts = 0;
+        xTimerStart(connParamTimer, 0);
         systemTask.PushMessage(Pinetime::System::Messages::BleConnected);
         // Service discovery is deferred via systemtask
       }
@@ -224,6 +238,7 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
       currentTimeClient.Reset();
       alertNotificationClient.Reset();
       connectionHandle = BLE_HS_CONN_HANDLE_NONE;
+      xTimerStop(connParamTimer, 0);
       if (bleController.IsConnected()) {
         bleController.Disconnect();
         fastAdvCount = 0;
@@ -235,6 +250,17 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
       /* The central has updated the connection parameters. */
       NRF_LOG_INFO("Update event : BLE_GAP_EVENT_CONN_UPDATE");
       NRF_LOG_INFO("update status=%0X ", event->conn_update.status);
+      if (event->conn_update.status == 0) {
+        struct ble_gap_conn_desc desc;
+        if (ble_gap_conn_find(event->conn_update.conn_handle, &desc) == 0) {
+          NRF_LOG_INFO("interval=%d (1.25 ms) latency=%d timeout=%d (10 ms)",
+                       desc.conn_itvl,
+                       desc.conn_latency,
+                       desc.supervision_timeout);
+        }
+      } else if (connParamAttempts < connParamMaxAttempts) {
+        xTimerStart(connParamTimer, 0);
+      }
       break;
 
     case BLE_GAP_EVENT_CONN_UPDATE_REQ:
@@ -390,6 +416,30 @@ int NimbleController::OnGAPEvent(ble_gap_event* event) {
 void NimbleController::StartDiscovery() {
   if (connectionHandle != BLE_HS_CONN_HANDLE_NONE) {
     serviceDiscovery.StartDiscovery(connectionHandle);
+  }
+}
+
+// Ask the phone for a slower connection once it is done setting up: 45-60 ms with peripheral latency 4, so the
+// radio wakes every 225-300 ms when idle. It fits Apple's Accessory Design Guidelines (Interval Min >= 15 ms,
+// Interval Min + 15 ms <= Interval Max, Interval Max * (Latency + 1) <= 2 s, 2 s <= timeout <= 6 s,
+// Interval Max * (Latency + 1) * 3 < timeout) and is what PebbleOS asks for when idle. The cost: the watch listens
+// only every (latency + 1) intervals when idle, so a phone->watch message (a notification) can wait up to 300 ms,
+// and this NimBLE controller applies the latency even with a reply queued, so a GATT round trip takes about 600 ms.
+// No faster interval is requested for DFU or file transfer.
+void NimbleController::RequestSlowConnection() {
+  if (connectionHandle == BLE_HS_CONN_HANDLE_NONE) {
+    return;
+  }
+  ble_gap_upd_params params {};
+  params.itvl_min = 36;             // 45 ms in 1.25 ms units
+  params.itvl_max = 48;             // 60 ms
+  params.latency = 4;               // connection events the watch may skip when it has nothing to send
+  params.supervision_timeout = 400; // 4 s in 10 ms units, > (1 + latency) * itvl_max * 2 = 600 ms
+  connParamAttempts++;
+  int rc = ble_gap_update_params(connectionHandle, &params);
+  NRF_LOG_INFO("connection parameter request %d: rc=%d", connParamAttempts, rc);
+  if (rc != 0 && connParamAttempts < connParamMaxAttempts) {
+    xTimerStart(connParamTimer, 0);
   }
 }
 

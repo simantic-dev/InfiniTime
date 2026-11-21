@@ -20,7 +20,7 @@ UUID_CURRENT_TIME = 0x2A2B
 UUID_NEW_ALERT = 0x2A46
 
 CONNECT_AT_US = int(6.0e6)
-NOTIFY_AT_US = int(10.0e6)
+NOTIFY_AT_US = int(78.0e6)  # after the idle windows run.sh measures
 # year (LE16), month, day, hours, minutes, seconds, day of week (Mon=1), fractions256, adjust reason
 TIME = bytes([2026 & 0xFF, 2026 >> 8, 11, 18, 14, 30, 0, 3, 0, 1])
 # <category 0 = simple alert><amount 1>\x00<title>\x00<body>; the format is InfiniTime's doc/ble.md
