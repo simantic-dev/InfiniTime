@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 SIM="${SIM:-sim}"
 # phase windows (virtual s) for the activity table: boot, advertising, connected, display off, display on (two wakes), notification
-PHASES='[["boot",0,2],["advertising, watch face",2,6],["connected, watch face",7,15],["connected, display off",22,44],["connected, watch face idle",46,60,62,76],["notification shown",92,99]]'
+PHASES='[["boot",0,2],["advertising, watch face",2,6],["connected, watch face",7,15],["connected, display off",22,44],["connected, watch face idle",46,60,62,76],["notification shown",81,88]]'
 [ -f out/infinitime.elf ] || scripts/build_infinitime.sh
 # the WFE in vPortSuppressTicksAndSleep and the instruction after its wait loop (the beq back to the WFE)
 read -r WFE AFTER < <(arm-none-eabi-objdump -d out/infinitime.elf | awk '/\twfe/ && !w {sub(":", "", $1); w = $1} w && /beq/ && $0 ~ w {getline; sub(":", "", $1); print w, $1; exit}')

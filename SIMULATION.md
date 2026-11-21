@@ -27,8 +27,8 @@ The same run as an MP4 (1920x1080, 30 fps): [demo.mp4](docs/screens/demo.mp4). P
 | 16.0 | the watch asks for 45-60 ms, latency 4, timeout 4 s (L2CAP Connection Parameter Update Request); the phone grants 60 ms, applied at 16.3 | |
 | 21 | the display times out | |
 | 45.0, 61.0 | side button (P0.13) held 150 ms, each after a display timeout: the face is shown again for 15 s | |
-| 78.0 to 91.6 | phone walks the GATT characteristic declarations to find New Alert (0x2A46), 600 ms per round trip at the slow interval | |
-| 91.6 | phone writes one alert, "Alex" / "Lunch 12:30?", in the format of `doc/ble.md`; accepted at 92.2, drawn from 92.0 | [png](docs/screens/notification.png) |
+| 78.0 to 80.8 | phone walks the GATT characteristic declarations to find New Alert (0x2A46), about 120 ms per round trip at the slow interval | |
+| 80.8 | phone writes one alert, "Alex" / "Lunch 12:30?", in the format of `doc/ble.md`; accepted at 80.92, drawn from 81.0 | [png](docs/screens/notification.png) |
 
 ```mermaid
 flowchart LR
@@ -62,12 +62,12 @@ Activity, not energy: no current or joule is fitted anywhere. From one run of th
 
 | Phase | window (s) | awake | wakeups/s | IRQ entries/s | top sources (entries/s) |
 |---|---|---|---|---|---|
-| boot | 0-2 | 65.5% | 266 | 2097 | SPIM0 (display, NOR) 762, RTC1 (tick) 663, PendSV 329, RADIO 174, RTC0 116 |
-| advertising, watch face | 2-6 | 7.8% | 293 | 771 | PendSV 383, RADIO 174, RTC0 116, RTC1 (tick) 69, POWER_CLOCK 29 |
-| connected, watch face | 7-15 | 7.3% | 233 | 576 | PendSV 312, RADIO 100, RTC0 67, RTC1 (tick) 64, POWER_CLOCK 33 |
+| boot | 0-2 | 65.1% | 268 | 2092 | SPIM0 (display, NOR) 762, RTC1 (tick) 658, PendSV 328, RADIO 174, RTC0 116 |
+| advertising, watch face | 2-6 | 7.9% | 296 | 770 | PendSV 382, RADIO 174, RTC0 116, RTC1 (tick) 68, POWER_CLOCK 29 |
+| connected, watch face | 7-15 | 7.2% | 234 | 576 | PendSV 312, RADIO 100, RTC0 66, RTC1 (tick) 64, POWER_CLOCK 33 |
 | connected, display off | 22-44 | 1.8% | 29 | 70 | PendSV 40, RTC1 (tick) 10, RADIO 10, RTC0 7, POWER_CLOCK 3 |
 | connected, watch face idle | 46-60, 62-76 | 6.8% | 75 | 228 | PendSV 136, RTC1 (tick) 59, SPIM0 (display, NOR) 13, RADIO 10, RTC0 7 |
-| notification shown | 92-99 | 17.2% | 457 | 2002 | SPIM0 (display, NOR) 1622, PendSV 209, RTC1 (tick) 151, RADIO 10, RTC0 7 |
+| notification shown | 81-88 | 15.8% | 453 | 1896 | SPIM0 (display, NOR) 1541, PendSV 203, RTC1 (tick) 133, RADIO 10, RTC0 7 |
 
 Task switches on an idle watch face, measured before the connection parameter change (30 ms interval; from a hook on `PendSV_Handler` after `vTaskSwitchContext`): IDLE 184/s, nimble LL 67/s, displayapp 50/s, MAIN (SystemTask) 11/s.
 
@@ -76,7 +76,7 @@ Task switches on an idle watch face, measured before the connection parameter ch
 **Ranked findings** (by activity removed, each tied to a code location; none is a claim about energy):
 
 1. **displayapp wakes 50 times a second on a static watch face** (and keeps the CPU awake ~7% of the time with the display on, against 2.5% with it off). `DisplayApp.cpp:266` passes the return of `lv_task_handler()` to the next `xQueueReceive` timeout, and LVGL's refresh and input timers are 20 ms (`src/libs/lv_conf.h:45` `LV_DISP_DEF_REFR_PERIOD`, `:115` `LV_INDEV_DEF_READ_PERIOD`). Letting LVGL's timers idle longer when nothing is animating removes most of the 50/s.
-2. **The SPI display path costs about 1600 IRQs/s while a screen animates** (notification window), against 0 on the static face. `SpiMaster::Write` (`src/drivers/SpiMaster.cpp`) waits for `EVENTS_END` by polling (`while (spiBaseAddress->EVENTS_END == 0)`), so the CPU is held awake for each transfer as well. Larger EasyDMA transfers per flush and waiting on the IRQ instead of polling would reduce both.
+2. **The SPI display path costs about 1500 IRQs/s while a screen animates** (notification window), against 0 on the static face. `SpiMaster::Write` (`src/drivers/SpiMaster.cpp`) waits for `EVENTS_END` by polling (`while (spiBaseAddress->EVENTS_END == 0)`), so the CPU is held awake for each transfer as well. Larger EasyDMA transfers per flush and waiting on the IRQ instead of polling would reduce both.
 3. **Fast advertising runs for the first 30 s of every advertising period** at 20 to 29 ms (`NimbleController.cpp:152-153`, `itvl_min 32` / `itvl_max 47` for 15 starts of 2 s): 29 ADV events/s, 174 RADIO and 116 RTC0 IRQs/s, the highest radio activity outside boot. After that it drops to 1.02 to 1.03 s (`:156-157`); that slow phase is not in this run.
 4. **Each BLE connection event the watch answers costs about 3 RADIO IRQs, 2 RTC0 IRQs, one POWER_CLOCK IRQ and about 6 context switches** (before the change, display off: RADIO 100, RTC0 67, POWER_CLOCK 33, PendSV 220 per second at 33 events/s). Addressed by the connection parameter request below: 3.3 answered events/s.
 5. **Boot keeps the CPU awake 65% of the first 2 s**, with SPIM0 762 and RTC1 tick 659 IRQs/s (display initialisation and the first draw). It happens once.
