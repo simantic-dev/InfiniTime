@@ -1,3 +1,10 @@
+<!-- simantic-banner -->
+> **Run this firmware with no hardware.** [Simantic](https://simantic.com) simulates the whole board, peripherals, sensors and buses included. Try it free at **[simantic.com](https://simantic.com)**, or run it locally: `curl -fsSL https://simantic.com/install | sh`
+
+## This fork: InfiniTime on a simulated PineTime
+
+Simantic's fork of InfiniTimeOrg/InfiniTime at 1.16.1, running unmodified on a simulated nRF52832 with the PineTime's display, touch, flash and a BLE phone. Demo, activity (power) study and how to run it: [SIMULATION.md](SIMULATION.md).
+
 <div align="center">
 
 ![Header Image](doc/logo/watchface_collage.png)
