@@ -5,6 +5,10 @@
 
 Simantic's fork of InfiniTimeOrg/InfiniTime at 1.16.1, running unmodified on a simulated nRF52832 with the PineTime's display, touch, flash and a BLE phone. Demo, activity (power) study and how to run it: [SIMULATION.md](SIMULATION.md).
 
+![The notification on the PineTime (shown first), then InfiniTime booting, taking the phone's time and receiving it](docs/screens/demo.gif)
+
+---
+
 <div align="center">
 
 ![Header Image](doc/logo/watchface_collage.png)
