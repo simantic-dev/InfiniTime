@@ -137,6 +137,7 @@ union ble_ll_conn_sm_flags {
         uint32_t rxd_features:1;
         uint32_t pending_hci_rd_features:1;
         uint32_t pending_initiate_dle:1;
+        uint32_t latency_hold:2;
     } cfbit;
     uint32_t conn_flags;
 } __attribute__((packed));

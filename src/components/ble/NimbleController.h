@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <FreeRTOS.h>
+#include <timers.h>
 
 #define min // workaround: nimble's min/max macros conflict with libstdc++
 #define max
@@ -80,6 +82,7 @@ namespace Pinetime {
 
       void EnableRadio();
       void DisableRadio();
+      void RequestSlowConnection();
 
     private:
       void PersistBond(struct ble_gap_conn_desc& desc);
@@ -111,6 +114,8 @@ namespace Pinetime {
       uint8_t addrType;
       uint16_t connectionHandle = BLE_HS_CONN_HANDLE_NONE;
       uint8_t fastAdvCount = 0;
+      TimerHandle_t connParamTimer;
+      uint8_t connParamAttempts = 0;
       uint8_t bondId[16] = {0};
     };
 

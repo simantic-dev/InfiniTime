@@ -2190,10 +2190,14 @@ ble_ll_conn_next_event(struct ble_ll_conn_sm *connsm)
         !connsm->csmflags.cfbit.conn_update_sched       &&
         !CONN_F_PHY_UPDATE_SCHED(connsm)                &&
         !connsm->csmflags.cfbit.chanmap_update_scheduled) {
-        if (connsm->csmflags.cfbit.pkt_rxd) {
+        if (connsm->csmflags.cfbit.pkt_rxd &&
+            !connsm->csmflags.cfbit.latency_hold) {
             latency += connsm->slave_latency;
             itvl = itvl * latency;
         }
+    }
+    if (connsm->csmflags.cfbit.latency_hold) {
+        connsm->csmflags.cfbit.latency_hold--;
     }
     connsm->event_cntr += latency;
 
@@ -3718,6 +3722,15 @@ ble_ll_conn_rx_data_pdu(struct os_mbuf *rxpdu, struct ble_mbuf_hdr *hdr)
     if ((llid == BLE_LL_LLID_DATA_FRAG) && (acl_len == 0)) {
         goto conn_rx_data_pdu_end;
     }
+
+    /*
+     * Do not apply slave latency for the next 2 connection events. The
+     * shortest request chain is a request at event N, the response at N+1
+     * and the central's next request at N+2. The peripheral may listen at
+     * any event (Core v6.3 Vol 6 Part B 4.5.1). Data sent by the
+     * peripheral on its own does not set this, so it is still batched.
+     */
+    connsm->csmflags.cfbit.latency_hold = 2;
 
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_ENCRYPTION)
     /*
