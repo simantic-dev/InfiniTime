@@ -1,0 +1,52 @@
+// PineTime (nRF52832) as InfiniTime drives it (src/drivers/PinMap.h): SPIM0 at 0x40003000 carries the
+// XT25F32 NOR (CS P0.05) and the ST7789 LCD (CS P0.25, D/CX P0.18, RESX P0.26); TWIM1 at 0x40004000
+// carries the CST816S touch (0x15, INT P0.28), BMA421 accelerometer (0x18) and HRS3300 heart-rate (0x44).
+// The nRF clocks are fixed-frequency (32 MHz HFXO, 32.768 kHz LFXO), which is what the PineTime fits.
+mux: SPI.SPIMultiplexer @ spi0
+    ActiveLowMask: 0x3
+
+spinor: SPI.ScriptedSpiSlave @ mux 0
+    file: "peers/spi/xt25f32.py"
+
+lcd: SPI.ScriptedSpiSlave @ mux 1
+    file: "peers/spi/st7789.py"
+    numberOfGpios: 3
+    config: "{\"height\": 240}"
+
+touch: I2C.ScriptedI2cSlave @ twi1 0x15
+    file: "peers/i2c/cst816s.py"
+    numberOfGpios: 1
+    config: "{}"
+    0 -> gpio0@28
+
+// MODELED SIMPLIFICATION: the BMA421 accelerometer and HRS3300 heart-rate sensor are plain register files
+// (chip id, motion bits idle), not sensors: no samples, no step counter, no interrupts.
+accel: I2C.ScriptedI2cSlave @ twi1 0x18
+    file: "peers/i2c/regfile.py"
+    config: "{\"regs\": {\"0x00\": 17}, \"ro\": {\"0x2a\": 1}}"
+
+hrs: I2C.ScriptedI2cSlave @ twi1 0x44
+    file: "peers/i2c/regfile.py"
+    config: "{\"regs\": {\"0x00\": 33}}"
+
+// The phone: a scripted BLE central in the watch's machine (a free bus slot, no registers), on the BLE
+// medium of scenario.yaml.
+phone: Wireless.ScriptedBlePeer @ sysbus 0x21000000
+    file: "peers/ble/phone.py"
+
+// Side button (P0.13, reads high while pressed), charger status CHG (P0.12) and power present (P0.19),
+// both active low (idle high = unplugged). The idle levels are driven again 1 ms in: the boot-time drive
+// does not reach the pads. The button is pressed at 32 s for 150 ms, after the display has timed out.
+buttons: Scripted.ScriptedGpioPeer @ none
+    file: "peers/gpio/pin_script.py"
+    config: "{\"idle\": {\"0\": 0, \"1\": 1, \"2\": 1}, \"events\": [{\"at_ms\": 1, \"line\": 1, \"level\": 1}, {\"at_ms\": 1, \"line\": 2, \"level\": 1}], \"holds\": [{\"line\": 0, \"at_ms\": 32000, \"for_ms\": 150, \"level\": 1}]}"
+    numberOfGpios: 3
+    0 -> gpio0@13
+    1 -> gpio0@12
+    2 -> gpio0@19
+
+gpio0:
+    5 -> mux@0
+    25 -> mux@1 | lcd@0
+    18 -> lcd@1
+    26 -> lcd@2
